@@ -1,0 +1,334 @@
+---
+title: "BYUfivethirtyeight"
+author: "Tanner Pickard"
+date: "September 24, 2020"
+output: word_document
+---
+
+```{r}
+library("rvest")
+library("tidyr")
+library("corrplot")
+library("ggplot2")
+library("bestglm")
+```
+
+
+```{r}
+# R SCRAPING
+
+#Available season Data from ESPN
+season_list <- seq(2003,2020,1)
+
+list_count <- 1
+
+byu_game_list <- list()
+
+byu_game_deets <- c()
+byu_total_deets <- c()
+
+for (i in season_list) {
+  byu_basketball_games <- read_html(paste0("https://www.espn.com/mens-college-basketball/team/schedule/_/id/252/season/", i))
+  
+  #Get all individual game urls
+  byu_game_href <- byu_basketball_games %>% 
+  html_nodes(".ml4") %>%
+  html_nodes("a") %>%
+  html_attr("href")
+  
+  byu_game_deets <- append(byu_game_deets, byu_game_href)
+  if (i > 2004) {
+    byu_total_deets <- append(byu_total_deets, byu_game_href)
+  } 
+  
+  #put each season data in one list, one data frame per year
+  byu_game_list[[list_count]] <-  as.data.frame(byu_basketball_games %>% html_table(fill = TRUE))
+
+  #Add the game's season year
+  byu_game_list[[list_count]][,ncol(byu_game_list[[list_count]])] <- i
+  
+  # Include some more columns
+  byu_game_list[[list_count]] <- cbind(byu_game_list[[list_count]], matrix(rep.int(c(0), (nrow(byu_game_list[[list_count]])) * 4) , nrow = nrow(byu_game_list[[list_count]]), ncol = 4))
+  
+  names(byu_game_list[[list_count]]) <- c("Date", "Opponent", "Score", "Record (Conf)", "HiPoints", "HiRebounds", "HiAssists", "Year", "PostSeason", "Location", "Result", "Overtime")
+  
+  list_count <- list_count + 1
+}
+```
+
+```{r}
+#Did the game take place in the postseason?, 1 if yes 0 if no
+byu_game_list[[1]]$PostSeason[4] <- 1
+byu_game_list[[2]]$PostSeason[4] <- 1
+byu_game_list[[4]]$PostSeason[4] <- 1
+byu_game_list[[5]]$PostSeason[4] <- 1
+byu_game_list[[6]]$PostSeason[4] <- 1
+byu_game_list[[7]]$PostSeason[4] <- 1
+byu_game_list[[8]]$PostSeason[c(4,6)] <- 1
+byu_game_list[[9]]$PostSeason[c(4,6,8)] <- 1
+byu_game_list[[10]]$PostSeason[c(4,6)] <- 1
+byu_game_list[[11]]$PostSeason[c(4,6,8,10)] <- 1
+byu_game_list[[12]]$PostSeason[4] <- 1
+byu_game_list[[13]]$PostSeason[4] <- 1
+byu_game_list[[14]]$PostSeason[c(4,6,8,10)] <- 1
+byu_game_list[[15]]$PostSeason[4] <- 1
+byu_game_list[[16]]$PostSeason[4] <- 1
+```
+
+```{r}
+#Separates Home/Away games by finding the @ symbol in Opponent, or the neutral site asterisk. 1 for home, 0 for away, 2 for neutral
+for (k in 1:length(byu_game_list)) {
+  if (length(grep("@", byu_game_list[[k]]$Opponent)) > 0) {
+    byu_game_list[[k]]$Location[(grep("@", byu_game_list[[k]]$Opponent) * -1)] <-  1
+  }
+  if (length(grep(" \\*", byu_game_list[[k]]$Opponent)) > 0) {
+    byu_game_list[[k]]$Location[grep(" \\*", byu_game_list[[k]]$Opponent)] <-  2
+  }
+}
+```
+
+
+```{r}
+#Remove rows that are just headers
+byu_game_list[[1]] <- byu_game_list[[1]][c(-1, -2, -3, -5, -6),]
+byu_game_list[[2]] <- byu_game_list[[2]][c(-1, -2, -3, -5, -6),]
+byu_game_list[[3]] <- byu_game_list[[3]][c(-1, -2),]
+byu_game_list[[4]] <- byu_game_list[[4]][c(-1, -2, -3, -5, -6),]
+byu_game_list[[5]] <- byu_game_list[[5]][c(-1, -2, -3, -5, -6),]
+byu_game_list[[6]] <- byu_game_list[[6]][c(-1, -2, -3, -5, -6),]
+byu_game_list[[7]] <- byu_game_list[[7]][c(-1, -2, -3, -5, -6),]
+byu_game_list[[8]] <- byu_game_list[[8]][c(-1, -2, -3, -5, -7, -8),]
+byu_game_list[[9]] <- byu_game_list[[9]][c(-1, -2, -3, -5, -7, -9, -10),]
+byu_game_list[[10]] <- byu_game_list[[10]][c(-1, -2, -3, -5, -7, -8),]
+byu_game_list[[11]] <- byu_game_list[[11]][c(-1, -2, -3, -5, -7, -9, -11, -12),]
+byu_game_list[[12]] <- byu_game_list[[12]][c(-1, -2, -3, -5, -6),]
+byu_game_list[[13]] <- byu_game_list[[13]][c(-1, -2, -3, -5, -6),]
+byu_game_list[[14]] <- byu_game_list[[14]][c(-1, -2, -3, -5, -7, -9, -11, -12),]
+byu_game_list[[15]] <- byu_game_list[[15]][c(-1, -2, -3, -5, -6),]
+byu_game_list[[16]] <- byu_game_list[[16]][c(-1, -2, -3, -5, -6),]
+byu_game_list[[17]] <- byu_game_list[[17]][c(-1, -2),]
+byu_game_list[[18]] <- byu_game_list[[18]][c(-1, -2),]
+```
+
+
+```{r}
+#Splitting the Stat and the Player.
+for (year in season_list) {
+    byu_game_list[[year - 2002]] <- separate(byu_game_list[[year - 2002]], "HiPoints", c("HiScorer", "TopPoints"), sep = "[  ]{2}", extra = "merge")
+    
+    byu_game_list[[year - 2002]] <- separate(byu_game_list[[year - 2002]], "HiRebounds", c("HiBounder", "TopBounds"), sep = "[  ]{2}", extra = "merge")
+    
+    byu_game_list[[year - 2002]] <- separate(byu_game_list[[year - 2002]], "HiAssists", c("HiAssister", "TopAssists"), sep = "[  ]{2}", extra = "merge")
+    
+    byu_game_list[[year - 2002]]$Result <- substr(byu_game_list[[year - 2002]]$Score, 1, 1)
+    
+    byu_game_list[[year - 2002]]$Score <- substring(byu_game_list[[year - 2002]]$Score, 2)
+    
+    for(game in 1:length(byu_game_list[[year - 2002]]$Score)) {
+      if (nchar(byu_game_list[[year - 2002]]$Score[game]) > 7) {
+        byu_game_list[[year - 2002]]$Overtime[game] <- 1
+      }
+    }
+}
+```
+
+
+```{r}
+#This code block gathers the team-wide game scores.
+totalseason <- data.frame()
+totalseasondeets <- data.frame()
+for (season in season_list) {
+  totalseason <- rbind(totalseason, byu_game_list[[season - 2002]])
+}
+totalseason <- totalseason[totalseason$Result != "P",]
+totalseason <- cbind(totalseason, seq(1, nrow(totalseason)))
+names(totalseason)[ncol(totalseason)] <- "GameId"
+
+
+for(season in season_list[c(-1, -2)]) {
+  totalseasondeets <- rbind(totalseasondeets, byu_game_list[[season - 2002]])
+}
+totalseasondeets <- totalseasondeets[totalseasondeets$Result != "P",]
+
+totalseasondeets <- separate(totalseasondeets, "Score", c("BYUScore", "OppScore"), sep = "-")
+
+totalseasondeets[,3] <- as.integer(totalseasondeets[,3])
+totalseasondeets[,4] <- as.integer(totalseasondeets[,4])
+
+newseq <- c(1,2,4,3,seq(5,16))
+
+for(l in 1:nrow(totalseasondeets)) {
+  if(totalseasondeets[l, 15] == "L") {
+    totalseasondeets[l,] <- totalseasondeets[l,newseq]
+  }
+}
+
+#The remaining portion of this code converts datatypes and generates key values for data merging later on.
+totalseasondeets <- cbind(totalseasondeets, (totalseasondeets[,3] - totalseasondeets[,4]))
+names(totalseasondeets)[ncol(totalseasondeets)] <- "ScoreDifference"
+
+totalseasondeets <- cbind(totalseasondeets, seq(1, nrow(totalseasondeets)))
+names(totalseasondeets)[ncol(totalseasondeets)] <- "GameId"
+
+totalseason$TopPoints <- as.numeric(totalseason$TopPoints)
+totalseason$TopBounds <- as.numeric(totalseason$TopBounds)
+totalseason$TopAssists <- as.numeric(totalseason$TopAssists)
+totalseason$HiScorer <- as.factor(totalseason$HiScorer)
+totalseason$HiAssister <- as.factor(totalseason$HiAssister)
+totalseason$HiBounder <- as.factor(totalseason$HiBounder)
+
+totalseasondeets$TopPoints <- as.numeric(totalseasondeets$TopPoints)
+totalseasondeets$TopBounds <- as.numeric(totalseasondeets$TopBounds)
+totalseasondeets$TopAssists <- as.numeric(totalseasondeets$TopAssists)
+totalseasondeets$HiScorer <- as.factor(totalseasondeets$HiScorer)
+totalseasondeets$HiAssister <- as.factor(totalseasondeets$HiAssister)
+totalseasondeets$HiBounder <- as.factor(totalseasondeets$HiBounder)
+totalseasondeets$Result <- as.factor(totalseasondeets$Result)
+totalseasondeets$Overtime <- as.factor(totalseasondeets$Overtime)
+totalseasondeets$Location <- as.factor(totalseasondeets$Location)
+totalseasondeets$PostSeason <- as.factor(totalseasondeets$PostSeason)
+```
+
+
+```{r}
+byu_box_deets <- vector()
+#Changes the gamecast url to boxscore url
+for (game in 1:length(byu_game_deets)) {
+  byu_box_deets[game] <- sub("/game\\?", "/boxscore?", byu_game_deets[game])
+}
+for (game in 1:length(byu_total_deets)) {
+  byu_total_deets[game] <- sub("/game\\?", "/boxscore?", byu_total_deets[game])
+}
+```
+
+```{r}
+#This coding block scrapes player performance for each game.WARNING! Slow...
+byu_player_box <- list()
+byu_team_box <- data.frame()
+for (game in 1:length(byu_total_deets)) {
+byu_game_data <- read_html(byu_total_deets[game])
+
+byu_abbr <- byu_game_data %>%
+  html_nodes("#gamepackage-boxscore-module") %>%
+  html_nodes(".mod-data") %>%
+  html_nodes(".abbr")
+
+xml_remove(byu_abbr)
+rm(byu_abbr)
+
+  byu_game_boxscore <- byu_game_data %>%
+  html_nodes("#gamepackage-boxscore-module") %>%
+  html_nodes(".mod-data") %>%
+  html_table(fill = TRUE)
+
+  byu_name_test <- byu_game_data %>%
+  html_nodes("#gamepackage-boxscore-module") %>%
+  html_nodes(".team-name") %>%
+  html_text()
+  
+  
+  if(byu_name_test[1] == "BYU") {
+    byu_singlebox <- byu_game_boxscore[[1]]
+  } else {
+    byu_singlebox <- byu_game_boxscore[[2]]
+  }
+  
+  byu_singlebox$Starters <- gsub("([a-z])([A-Z])(-[A-Z])*$", "\\1 \\2\\3", byu_singlebox$Starters)
+  
+  byu_singlebox <- byu_singlebox[c(-6, -(nrow(byu_singlebox) - 1), -nrow(byu_singlebox)),]
+
+byu_singlebox <- separate(byu_singlebox, "Starters", c("Player", "Position"), sep = "(?<![.]) ", extra = "merge")
+
+byu_singlebox$MIN <- as.integer(byu_singlebox$MIN)
+
+byu_singlebox <- separate(byu_singlebox, "FG", c("FGM", "FGA"), sep = "-")
+byu_singlebox <- separate(byu_singlebox, "3PT", c("3PM", "3PA"), sep = "-")
+byu_singlebox <- separate(byu_singlebox, "FT", c("FTM", "FTA"), sep = "-")
+
+for (col in 3:ncol(byu_singlebox)) {
+  byu_singlebox[,col] <- as.integer(byu_singlebox[,col])
+}
+
+  byu_player_box[[game]] <- byu_singlebox
+
+}
+```
+
+```{r}
+#Calculate Percentage Rates for shots and add Game ID
+teamgame <- data.frame(matrix(nrow = 1, ncol = 16))
+names(teamgame) <- names(byu_singlebox[,3:18])
+teamperformance <- data.frame()
+
+for (game in 1:length(byu_player_box)) {
+  for(nums in 3:ncol(byu_player_box[[game]])) {
+    teamgame[nums - 2] <- sum(byu_player_box[[game]][,nums])
+    teamgame$FGPerc <- (teamgame[1,2]/teamgame[1,3])
+    teamgame$TPPerc <- (teamgame[1,4]/teamgame[1,5])
+    teamgame$FTPerc <- (teamgame[1,6]/teamgame[1,7])
+  }
+  teamperformance <- rbind(teamperformance, teamgame)
+}
+
+teamperformance <- cbind(teamperformance, seq(1, nrow(teamperformance)))
+names(teamperformance)[ncol(teamperformance)] <- "GameId"
+```
+
+
+```{r}
+#Merge the different data sets by the GameId
+datameld <- merge(x=totalseasondeets, y=teamperformance, by = "GameId")
+cleandatameld <- datameld[complete.cases(datameld),]
+```
+
+```{r}
+#This code block can check the odds of victory with team wide statistics.
+byu.log.subsets <- bestglm(cleandatameld[,c(21,seq(26,33),seq(35,37),16)],
+                            IC = "AIC",
+                            method = "exhaustive",
+                            family = binomial(link = "logit"),
+                            TopModels = 10)
+
+byu.log.subsets$BestModel
+```
+
+
+```{r}
+byu.reg.subsets <- bestglm(cleandatameld[,c(21,seq(27,33),seq(35,37),18)],
+                            IC = "AIC",
+                            method = "exhaustive",
+                            TopModels = 10)
+
+byu.reg.subsets$BestModel
+```
+
+```{r}
+#Add GameID to individual player performances
+byu_player_frame <- data.frame()
+for (n in 1:length(byu_player_box)) {
+  byu_player_box[[n]] <- cbind(byu_player_box[[n]], rep.int(n, nrow(byu_player_box[[n]])))
+  names(byu_player_box[[n]])[19] <- "GameId"
+  byu_player_frame <- rbind(byu_player_frame, byu_player_box[[n]])
+}
+```
+
+```{r}
+palette(c("red","blue"))
+#This plot shows the strong relationship between the turnover/relationship differential and victory
+plot(cleandatameld$REB, cleandatameld$TO, pch = 4, col = cleandatameld$Result)
+legend(55, 25, unique(cleandatameld$Result),col=1:length(cleandatameld$Result),pch=1)
+
+hist(cleandatameld$PTS[(cleandatameld$Result == "W" & cleandatameld$Overtime == 0)], breaks = seq(30, 130, by = 4), col=rgb(1,0,0,0.5),xlim=c(30,130), ylim=c(0,60), main="Points versus Result", xlab="Points Scored", labels = TRUE)
+hist(cleandatameld$PTS[(cleandatameld$Result == "L" & cleandatameld$Overtime == 0)], col=rgb(0,0,1,0.5), breaks = seq(30, 130, by = 4), add=T, labels = FALSE)
+legend("topright", c("Win", "Loss", "Overlap"), col=c("red", "blue", "purple"), lwd=10)
+box()
+```
+
+
+```{r}
+#commented out for clarity
+#write.csv(cleandatameld, "C:\\Users\\tanne\\OneDrive\\Documents\\Personal Stats\\byubasketball538team.csv")
+#write.csv(byu_player_frame, "C:\\Users\\tanne\\OneDrive\\Documents\\Personal Stats\\byubasketball538players.csv")
+
+```
+
